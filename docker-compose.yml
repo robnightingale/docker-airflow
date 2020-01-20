@@ -1,0 +1,64 @@
+version: '3'
+services:
+  redis:
+    image: woahbase/alpine-redis:latest
+    ports:
+    - "6379:6379"
+
+  mysql:
+    image: jbergstroem/mariadb-alpine:10.1.28
+    ports:
+    - 3306:3306
+    restart: always
+    environment:
+    - MYSQL_ROOT_PASSWORD=secret
+    - MYSQL_USER=airflow
+    - MYSQL_PASSWORD=airflow
+    - MYSQL_DATABASE=airflow
+    volumes: &mysql_volumes
+    - ./config/my.cnf:/etc/mysql/my.cnf
+
+  adminer:
+    image: edyan/adminer
+    restart: always
+    ports:
+    - 8081:8080
+
+  webserver:
+    image: &airflow_image
+      quay.io/vektorcloud/airflow:1.10.7
+    restart: always
+    depends_on:
+#    - mysql
+    - redis
+    environment: &airflow_env
+    - AIRFLOW__CORE__LOAD_EXAMPLES=True
+    - FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
+    - EXECUTOR=Local
+    - AIRFLOW_INIT_DB=1
+    volumes: &airflow_volumes
+    - ./dags:/airflow/dags
+#    - ./plugins:/airflow/gcs/plugins
+    ports:
+    - "8080:8080"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        airflow scheduler &
+        airflow webserver
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /airflow/airflow-webserver.pid ]"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+#  rest-server:
+#    image: chentex/go-rest-api
+#    restart: always
+#    ports:
+#    - "8181:8080"
+#  httpbin:
+#     image: stevet/httpbin-alpine:latest
+#     ports:
+#     - "8000:8000"

@@ -1,0 +1,8 @@
+paramiko
+Cython
+pytz
+pyOpenSSL
+ndg-httpsclient
+pyasn1
+apache-airflow[crypto,celery,hive,jdbc,mysql]==1.10.7
+celery[redis]==4.1.1

@@ -1,20 +1,52 @@
-# VERSION 1.10.0-2
-# AUTHOR: Matthieu "Puckel_" Roisil
-# DESCRIPTION: Basic Airflow container
-# BUILD: docker build --rm -t puckel/docker-airflow .
-# SOURCE: https://github.com/puckel/docker-airflow
+FROM minidocks/python:3.7 as base
 
-FROM python:3.6-slim
-LABEL maintainer="Puckel_"
+FROM base as builder
 
-# Never prompts the user for choices on installation/configuration of packages
-ENV DEBIAN_FRONTEND noninteractive
-ENV TERM linux
+ENV AIRFLOW_COMPONENTS="crypto,celery,hive,jdbc,mysql,s3"
 
-# Airflow
-ARG AIRFLOW_VERSION=1.10.0
-ARG AIRFLOW_HOME=/usr/local/airflow
-ENV AIRFLOW_GPL_UNIDECODE yes
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m virtualenv --python=/usr/bin/python3 $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+ENV PACKAGES="\
+  alpine-sdk \
+  mariadb-dev \
+  dumb-init \
+  musl \
+  linux-headers \
+  build-base \
+  ca-certificates \
+  python3 \
+  python3-dev \
+  py-setuptools \
+  openssh \
+  libffi-dev \
+  libxslt-dev \
+  libxslt \
+  libxml2 \
+  libxml2-dev  \
+  gcc \
+"
+
+RUN apk --update upgrade \
+  && apk add --force $PACKAGES \
+  && CFLAGS="-I/usr/include/libxml2"
+
+RUN pip install -U pip apache-airflow["$AIRFLOW_COMPONENTS"] celery docker-py \
+    paramiko \
+    Cython \
+    pytz \
+    pyOpenSSL \
+    ndg-httpsclient \
+    pyasn1 \
+    celery[redis]==4.1.1
+
+FROM minidocks/python:3.7
+#FROM alpine:3.9
+
+#RUN apk add dumb-init python3
+RUN apk add dumb-init
+COPY --from=builder /opt/venv /opt/venv
 
 # Define en_US.
 ENV LANGUAGE en_US.UTF-8
@@ -23,64 +55,31 @@ ENV LC_ALL en_US.UTF-8
 ENV LC_CTYPE en_US.UTF-8
 ENV LC_MESSAGES en_US.UTF-8
 
-RUN set -ex \
-    && buildDeps=' \
-        python3-dev \
-        libkrb5-dev \
-        libsasl2-dev \
-        libssl-dev \
-        libffi-dev \
-        libblas-dev \
-        liblapack-dev \
-        libpq-dev \
-        git \
-    ' \
-    && apt-get update -yqq \
-    && apt-get upgrade -yqq \
-    && apt-get install -yqq --no-install-recommends \
-        $buildDeps \
-        build-essential \
-        python3-pip \
-        python3-requests \
-        mysql-client \
-        mysql-server \
-        default-libmysqlclient-dev \
-        apt-utils \
-        curl \
-        rsync \
-        netcat \
-        locales \
-    && sed -i 's/^# en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/g' /etc/locale.gen \
-    && locale-gen \
-    && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
-    && useradd -ms /bin/bash -d ${AIRFLOW_HOME} airflow \
-    && pip install -U pip setuptools wheel \
-    && pip install Cython \
-    && pip install pytz \
-    && pip install pyOpenSSL \
-    && pip install ndg-httpsclient \
-    && pip install pyasn1 \
-    && pip install apache-airflow[crypto,celery,postgres,hive,jdbc,mysql]==$AIRFLOW_VERSION \
-    && pip install 'celery[redis]>=4.1.1,<4.2.0' \
-    && apt-get purge --auto-remove -yqq $buildDeps \
-    && apt-get autoremove -yqq --purge \
-    && apt-get clean \
-    && rm -rf \
-        /var/lib/apt/lists/* \
-        /tmp/* \
-        /var/tmp/* \
-        /usr/share/man \
-        /usr/share/doc \
-        /usr/share/doc-base
+# Airflow
+ARG AIRFLOW_VERSION=1.10.7
+ARG AIRFLOW_HOME=/airflow
 
-COPY script/entrypoint.sh /entrypoint.sh
-COPY config/airflow.cfg ${AIRFLOW_HOME}/airflow.cfg
+ENV \
+  AIRFLOW__CORE__AIRFLOW_HOME=$AIRFLOW_HOME \
+  AIRFLOW__CORE__DAGS_FOLDER=$AIRFLOW_HOME/dags \
+  AIRFLOW__CORE__BASE_LOG_FOLDER=$AIRFLOW_HOME/logs \
+  AIRFLOW__CORE__PLUGINS_FOLDER=$AIRFLOW_HOME/plugins \
+  AIRFLOW__CORE__EXECUTOR=SequentialExecutor \
+  AIRFLOW__CORE__SQL_ALCHEMY_CONN=sqlite://$AIRFLOW_HOME/airflow.db \
+  AIRFLOW__CORE__LOAD_EXAMPLES=False
 
-RUN chown -R airflow: ${AIRFLOW_HOME}
+COPY dags/ $AIRFLOW_HOME/dags
+COPY script/entrypoint.sh /
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+RUN cd /home && mkdir airflow && cd airflow \
+  && adduser -S airflow \
+  && chown -R airflow: ${AIRFLOW_HOME}
+USER airflow
 
 EXPOSE 8080 5555 8793
 
-USER airflow
-WORKDIR ${AIRFLOW_HOME}
+CMD ["airflow", "webserver"]
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["webserver"] # set default arg for entrypoint
